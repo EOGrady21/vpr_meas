@@ -1,0 +1,184 @@
+---
+title: "VPR measurement analysis"
+output: html_notebook
+---
+
+This R markdown notebook is meant as a template to perform analysis of VPR image measurements collected in ImageJ. 
+The code in this notebook can be exported and customized using `knitr::purl('Analysis_Template.Rmd', 'my_workflow.R')`
+
+
+```{r set-up}
+librarian::shelf(vprr, tidyverse, oce, ggplot2, multimode, plyr)
+```
+
+
+# Step 1: Find aid files and copy images you would like to measure.
+
+Before images can be measured in ImageJ they should be pulled into distinct folders, so that the ImageJ batch workflow can be run. 
+This can be done by identifying the appropriate aid files (output from machine learning/ classification workflow), then using these files to identify and copy images. 
+
+This workflow identifies a specific category of images to be measured but could be modified to copy any selection of images. If you already have measurement files from ImageJ, skip to the next step.
+
+```{r find and copy images}
+
+# INPUT VARIABLES ----
+basepath <- 'c:/NAS/data/COR2019002/autoid_COR2019002/' # autoid folder
+category_of_interest <- 'Calanus' # category of interest for measurement
+# select by station (d/h)
+stations <- c('CGR 1-4', '7.6_1', '7.6_2', 'P2-5', 'W39')
+# read in station info file
+stinfo <- read.csv('c:/VPR_PROJECT/COR2019002/SCRIPTS/station_names_COR2019002.csv')
+valid_dh <- stinfo$day_hour[stinfo$station %in% stations]
+# working dir (where images will be copied)
+wd <- 'c:\\users\\chisholme\\documents\\github\\vpr_meas\\' # !! NEEDS THIS FILE SEP '\\' TO WORK IN CMD LINE !!
+
+# FIND AID FILES ----
+
+aid_path <- file.path(basepath, category_of_interest)
+
+# all aid files
+aid_files <- list.files(aid_path, recursive = TRUE, pattern = 'new_aid', full.names = TRUE)
+# select by station (d/h)
+valid_aids <- list()
+for(dh in valid_dh){
+  valid_aids[[dh]] <- grep(aid_files, pattern = dh, value = TRUE)
+}
+
+# COPY IMAGES ----
+
+for(i in 1:length(valid_aids)){
+  dh <- names(valid_aids[i])
+  aid_fn <- valid_aids[i][[1]][1]
+  
+  aidlist <- read.table(aid_fn)
+  st <- stinfo$station[stinfo$day_hour == dh]
+  st <- gsub(pattern = ' ', replacement = '', x = st)
+  outdir <- file.path('data', st , fsep = '\\')
+  foldername <- paste0(category_of_interest, '_rois')
+  full_dir <- file.path(wd, outdir, foldername, fsep = '\\')
+  dir.create(full_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  for (ii in 1:length(aidlist$V1)){
+    cmd1 <- paste("copy", aidlist$V1[ii], full_dir, sep = " ")
+    shell(cmd1)
+    cat( ii, '/', length(aidlist$V1), '\n')
+  }
+  cat('---- station: ', st, 'complete! ---- \n')
+}
+
+```
+
+# Step 1.5
+RUN IMAGEJ WORKFLOW!
+
+# Step 2: Read in ImageJ data
+The ImageJ batch workflow should output a csv file of measurement data and then the measurement data can be read into R for analysis.
+
+This function helps to read in ImageJ data and parses the ROI number from the file path for each image.
+
+```{r readAndFix function for imageJ data}
+readAndFix <- function(file){
+  dat <- read.csv(file)
+  dat$Label <- as.character(readr::parse_number(x = dat$Label, trim_ws = TRUE, locale = locale(grouping_mark = '.')))
+  return(dat)
+}
+```
+
+First gather the csv measurement files, in this case they were output to a data directory but that is flexible and determined in the imageJ batch workflow. This template shows how you would pull together multiple stations of measurement data. 
+
+```{r read ImageJ files}
+# gather all csv files
+res_fn <- list.files(path = 'data/', pattern = '.csv', recursive = TRUE, full.names = TRUE)
+
+dat_7.6_1 <- readAndFix(res_fn[1])
+dat_7.6_2 <- readAndFix(res_fn[2])
+dat_cgr14 <- readAndFix(res_fn[3])
+dat_p25 <- readAndFix(res_fn[5])
+dat_w39 <- readAndFix(res_fn[6])
+
+
+dat_7.6_1 <- dat_7.6_1 %>%
+  dplyr::mutate(., station = '7.6_1')
+dat_7.6_2 <- dat_7.6_2 %>%
+  dplyr::mutate(., station = '7.6_2')
+dat_cgr14 <- dat_cgr14 %>%
+  dplyr::mutate(., station = 'CGR 1-4')
+dat_p25 <- dat_p25 %>%
+  dplyr::mutate(., station = 'P2-5')
+dat_w39 <- dat_w39 %>%
+  dplyr::mutate(., station = 'W39')
+
+all_dat <- merge(merge(merge(merge(merge(
+  dat_7.6_1,
+  dat_7.6_2, all = TRUE),
+  dat_cgr14, all = TRUE),
+  dat_p25, all = TRUE),
+  dat_w39, all = TRUE),
+  cgr16_dat, all = TRUE)
+```
+
+Once the data has been read into R and merged into a single dataframe, analysis can begin. 
+This next chunk of code selects only the largest object detected in each ROI image. This filtering removes smaller particles which may have been caught by imageJ thresholding, such as background marine snow particles. Use this step with some caution as it has the potential to remove valid data if there are multiple objects in each ROI.
+
+```{r Filter data}
+all_dat <- all_dat %>%
+  group_by(Label) %>%
+  filter(Area == max(Area)) 
+```
+
+
+# Step 3: Plot measurement data
+
+This step shows some simple exploratory plots that can help guide an analysis of the measurement data collected.
+
+```{r Plot- Histogram}
+ggplot(all_dat)+
+  geom_histogram(aes(x = Major, fill = station), colour = 'black', binwidth = 1)+
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank())
+
+ggplot(all_dat)+
+  geom_histogram(aes(x = Area, fill = station), colour = 'black', binwidth = 50, alpha = 0.5)+
+  theme(panel.background = element_blank(),
+        panel.grid = element_blank())
+```
+
+
+
+```{r Plot- Probability Density}
+ggplot(all_dat, aes(x=Major, fill=station)) + geom_density(alpha=.3)
+ggplot(all_dat, aes(x=Area, fill=station)) + geom_density(alpha=.3)
+ggplot(all_dat, aes(x=Feret, fill=station)) + geom_density(alpha=.3)
+
+```
+
+
+# Step 4 (optional): Convert measurement data to mm
+
+This step can be undertaken if you wish to look at the measurement data in mm instead of pixels (as output by imageJ). This template uses a conversion factor found in the VPR manual. Please use with caution and check that you have the right conversion factor for your dataset.
+
+```{r convert to mm}
+#px to mm conversion factor
+frame_mm <- 42 # unique to VPR and magnification setting (mm width of image frame)
+mm_px <- frame_mm/1024 #1024 is resolution of VPR images (p.4 DAVPR manual)
+mm2_px2 <- (mm_px)^2
+
+all_dat_mm <- all_dat %>%
+  mutate(., area_mm = Area*mm2_px2)%>%
+  mutate(., perim_mm = Perim.*mm_px)%>%
+  mutate(., major_mm = Major*mm_px)%>%
+  mutate(., feret_mm = Feret*mm_px)%>%
+  select(Label, area_mm, perim_mm, major_mm, feret_mm, station)
+```
+
+Plots can then be redone with data in millimetres
+
+```{r Plot- mm}
+ggplot(all_dat_mm)+
+  geom_histogram(aes(x = major_mm, fill = station), alpha = 0.5)+
+  theme(panel.background = element_blank())
+
+ggplot(all_dat_mm, aes(x=major_mm, fill=station)) + geom_density(alpha=.3)+
+  scale_x_continuous(limits = c(0, 7.5))
+```
+
