@@ -83,3 +83,15 @@ ggplot(dat2)+
 ggplot(dat2)+
   geom_point(aes(x = grscale, y = ddavg, shape = ee), size = 5)
 # exclude on edges reduces multiple objects per image
+
+# recc = grscale 200
+
+all_dat <- dat2 %>%
+  group_by(Label) %>%
+  filter(Area == max(Area)) 
+
+all_dat <- all_dat %>%
+  mutate(., dvar = range(Major)) # quantify variance in meas between sample runs?
+
+ggplot(all_dat[1:10,])+
+  geom_point(aes(x = Label, y = Major, col = id), alpha = 0.1, size = 5)
