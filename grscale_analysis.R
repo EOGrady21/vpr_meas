@@ -1,4 +1,11 @@
-# analysis of growth scale parameter in imageJ 
+# E OGrady 2022
+# This script is an analysis of the growth scale parameter used in autodeck.
+# Using imageJ to measure images allow a functionality where objects touching
+# the edge are excluded from measurements. The idea was to confirm the best
+# growth scale setting in AutoDeck to maximize valid image measurements in
+# ImageJ without significanlty increasing the level of background material
+# detected.
+
 librarian::shelf(vprr, tidyverse, oce, ggplot2, multimode, plyr)
 
 # read in various image sets ----
